@@ -1,0 +1,91 @@
+import  torch
+import  numpy as np
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
+
+
+class DiabetesDataset(Dataset):
+    def __init__(self,filepath):
+        xy = np.loadtxt(filepath,delimiter=',',dtype=np.float32)
+        self._1 = xy[:, :1].max() - xy[:, :1].min()
+        self._2 = xy[:, 1:2].max() - xy[:, 1:2].min()
+        self._3 = xy[:, 2:3].max() - xy[:, 2:3].min()
+        self._4 = xy[:, 3:4].max() - xy[:, 3:4].min()
+        self.min_1 = xy[:, :1].min()
+        self.min_2 = xy[:, 1:2].min()
+        self.min_3 = xy[:, 2:3].min()
+        self.min_4 = xy[:, 3:4].min()
+
+        xy[:, :1] = (xy[:, :1] - self.min_1) / self._1
+        xy[:, 1:2] = (xy[:, 1:2] - self.min_2) / self._2
+        xy[:, 2:3] = (xy[:, 2:3] - self.min_3) / self._3
+        xy[:, 3:4] = (xy[:, 3:4] - self.min_4) / self._4
+
+        self.len = xy.shape[0]
+        self.x_data = torch.from_numpy(xy[:, :-1])
+        self.y_data = torch.from_numpy(xy[:, -1])
+
+    def __getitem__(self, index):
+        return self.x_data[index],self.y_data[index]
+
+    def __len__(self):
+        return self.len
+
+
+dataset= DiabetesDataset('xxx.csv')
+test_loader = DataLoader(dataset=dataset,batch_size=25,shuffle=False,num_workers=2)
+
+class Model(torch.nn.Module):
+    def __init__(self):
+        super(Model,self).__init__()
+        self.linear1 = torch.nn.Linear(3,1024)
+        self.linear2 = torch.nn.Linear(1024,1024)
+        self.linear3 = torch.nn.Linear(1024,1024)
+        self.linear4 = torch.nn.Linear(1024,1)
+        self.LeakyReLU = torch.nn.LeakyReLU(0.2,True)
+    def forward(self, x):
+        x = self.LeakyReLU(self.linear1(x))
+        x = self.LeakyReLU(self.linear2(x))
+        x = self.LeakyReLU(self.linear3(x))
+        x = self.linear4(x)
+        return x
+
+def test(model):
+    model.eval()
+    result = []
+    real = []
+    with torch.no_grad():
+        for data in test_loader:
+            images, labels = data
+            outputs = model(images)
+            outputs = outputs.view(-1)
+            labels = labels.view(-1)
+            outputs = outputs * dataset._4 + dataset.min_4
+            labels = labels * dataset._4 + dataset.min_4
+            result += outputs.cpu().numpy().tolist()
+            real += labels.cpu().numpy().tolist()
+            #print(outputs.view(-1).cpu().numpy().tolist())
+            #print(labels * dataset._4 + dataset.min_4)
+
+    result = np.array(result)
+    real = np.array(real)
+
+    import pandas as pd
+
+    datas = pd.DataFrame(result,columns=['Pre'])
+    datas1 = pd.DataFrame(real, columns=['Real'])
+    df = pd.concat([datas,datas1], axis=1)
+    df.to_csv("result.csv")
+
+if __name__ == '__main__':
+    model = Model()
+    checkpoint = torch.load("./model.pkl")
+    model.load_state_dict(checkpoint)
+    test(model)
+
+
+
+
+
+
+
